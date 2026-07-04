@@ -35,16 +35,16 @@ async function fireMetaCAPI(eventName, data, req) {
   const externalIdRaw = email || refId || message_id;
   const externalId = externalIdRaw ? hashSHA256(externalIdRaw) : null;
 
-  // ⭐ Build comprehensive user_data
+  // ⭐ user_data TANPA IP + UA (karena dari Lynk backend, BUKAN buyer real)
+  // Kalo kirim IP server Lynk (52.220.x.x = AWS Singapore) + UA "python-requests",
+  // Meta detect sebagai "bot traffic" → event di-filter dari UI display
   const userData = {
     em: email ? [hashSHA256(email)] : [],
     ph: phone ? [hashSHA256(phone)] : [],
     fn: nameParts[0] ? [hashSHA256(nameParts[0])] : [],
     ln: nameParts.length > 1 ? [hashSHA256(nameParts.slice(1).join(' '))] : [],
     external_id: externalId ? [externalId] : [],
-    country: [hashSHA256('id')], // ⭐ Indonesia (buat regional match)
-    client_ip_address: req.headers['x-forwarded-for']?.split(',')[0] || 'unknown',
-    client_user_agent: req.headers['user-agent'] || 'Lynk-Webhook/1.0'
+    country: [hashSHA256('id')]
   };
 
   const contentIds = items?.map(item => item.uuid) || [];
@@ -56,8 +56,6 @@ async function fireMetaCAPI(eventName, data, req) {
   const contentName = items?.[0]?.title || 'Unknown Product';
 
   const eventTime = Math.floor(Date.now() / 1000);
-
-  // ⭐ event_source_url dinamis
   const eventSourceUrl = `https://lynk.id/checkout/${refId || 'success'}`;
 
   const payload = {
@@ -97,6 +95,7 @@ async function fireMetaCAPI(eventName, data, req) {
 
 // ==== MAIN HANDLER ====
 export default async function handler(req, res) {
+  // GET request → health check
   if (req.method === 'GET') {
     return res.status(200).json({
       status: 'ok',
@@ -126,6 +125,7 @@ export default async function handler(req, res) {
     const refId = message_data?.refId;
     const grandTotal = message_data?.totals?.grandTotal;
 
+    // ===== VERIFY SIGNATURE =====
     if (MERCHANT_KEY && signature) {
       const isValid = validateLynkSignature(refId, grandTotal, message_id, signature, MERCHANT_KEY);
       if (!isValid) {
@@ -137,6 +137,7 @@ export default async function handler(req, res) {
       console.warn('⚠️ Signature verification skipped');
     }
 
+    // ===== HANDLE EVENT =====
     if (eventType === 'payment.received' && data.message_action === 'SUCCESS') {
       const capiResult = await fireMetaCAPI('Purchase', data, req);
       console.log('📤 Meta CAPI Response:', JSON.stringify(capiResult.result));
