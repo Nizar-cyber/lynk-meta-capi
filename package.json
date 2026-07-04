@@ -1,0 +1,9 @@
+{
+  "name": "lynk-meta-capi",
+  "version": "1.0.0",
+  "description": "Lynk.id Webhook to Meta CAPI",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  }
+}
