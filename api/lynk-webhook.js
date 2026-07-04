@@ -28,12 +28,21 @@ async function fireMetaCAPI(eventName, data, req) {
   const { customer, items, totals, refId } = message_data;
 
   const nameParts = customer?.name ? customer.name.split(' ') : [];
+  const email = customer?.email || null;
+  const phone = customer?.phone ? String(customer.phone).replace(/\D/g, '') : null;
 
+  // ⭐ external_id = hashed email/refId (BOOST match quality)
+  const externalIdRaw = email || refId || message_id;
+  const externalId = externalIdRaw ? hashSHA256(externalIdRaw) : null;
+
+  // ⭐ Build comprehensive user_data
   const userData = {
-    em: customer?.email ? [hashSHA256(customer.email)] : [],
-    ph: customer?.phone ? [hashSHA256(String(customer.phone).replace(/\D/g, ''))] : [],
+    em: email ? [hashSHA256(email)] : [],
+    ph: phone ? [hashSHA256(phone)] : [],
     fn: nameParts[0] ? [hashSHA256(nameParts[0])] : [],
     ln: nameParts.length > 1 ? [hashSHA256(nameParts.slice(1).join(' '))] : [],
+    external_id: externalId ? [externalId] : [],
+    country: [hashSHA256('id')], // ⭐ Indonesia (buat regional match)
     client_ip_address: req.headers['x-forwarded-for']?.split(',')[0] || 'unknown',
     client_user_agent: req.headers['user-agent'] || 'Lynk-Webhook/1.0'
   };
@@ -46,9 +55,10 @@ async function fireMetaCAPI(eventName, data, req) {
   })) || [];
   const contentName = items?.[0]?.title || 'Unknown Product';
 
-  // ⭐ FIX: Pake Date.now() biar timestamp UTC selalu valid
-  // Sebelumnya parse dari createdAt Lynk yang timezone WIB → Meta dianggap "in the future"
   const eventTime = Math.floor(Date.now() / 1000);
+
+  // ⭐ event_source_url dinamis
+  const eventSourceUrl = `https://lynk.id/checkout/${refId || 'success'}`;
 
   const payload = {
     data: [{
@@ -56,7 +66,7 @@ async function fireMetaCAPI(eventName, data, req) {
       event_time: eventTime,
       event_id: refId || message_id,
       action_source: 'website',
-      event_source_url: 'https://lynk.id/',
+      event_source_url: eventSourceUrl,
       user_data: userData,
       custom_data: {
         currency: 'IDR',
@@ -82,12 +92,11 @@ async function fireMetaCAPI(eventName, data, req) {
     body: JSON.stringify(payload)
   });
 
-  return { ok: response.ok, result: await response.json() };
+  return { ok: response.ok, result: await response.json(), payload };
 }
 
 // ==== MAIN HANDLER ====
 export default async function handler(req, res) {
-  // GET request → health check
   if (req.method === 'GET') {
     return res.status(200).json({
       status: 'ok',
@@ -117,7 +126,6 @@ export default async function handler(req, res) {
     const refId = message_data?.refId;
     const grandTotal = message_data?.totals?.grandTotal;
 
-    // ===== VERIFY SIGNATURE =====
     if (MERCHANT_KEY && signature) {
       const isValid = validateLynkSignature(refId, grandTotal, message_id, signature, MERCHANT_KEY);
       if (!isValid) {
@@ -129,10 +137,10 @@ export default async function handler(req, res) {
       console.warn('⚠️ Signature verification skipped');
     }
 
-    // ===== HANDLE EVENT =====
     if (eventType === 'payment.received' && data.message_action === 'SUCCESS') {
       const capiResult = await fireMetaCAPI('Purchase', data, req);
       console.log('📤 Meta CAPI Response:', JSON.stringify(capiResult.result));
+      console.log('📤 User data sent:', JSON.stringify(capiResult.payload.data[0].user_data));
 
       return res.status(200).json({
         success: true,
