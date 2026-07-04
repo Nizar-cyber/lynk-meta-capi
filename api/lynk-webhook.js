@@ -25,7 +25,7 @@ function hashSHA256(value) {
 // ==== HELPER: Fire event ke Meta CAPI ====
 async function fireMetaCAPI(eventName, data, req) {
   const { message_data, message_id } = data;
-  const { customer, items, totals, refId, createdAt } = message_data;
+  const { customer, items, totals, refId } = message_data;
 
   const nameParts = customer?.name ? customer.name.split(' ') : [];
 
@@ -46,9 +46,9 @@ async function fireMetaCAPI(eventName, data, req) {
   })) || [];
   const contentName = items?.[0]?.title || 'Unknown Product';
 
-  const eventTime = createdAt
-    ? Math.floor(new Date(createdAt).getTime() / 1000)
-    : Math.floor(Date.now() / 1000);
+  // ⭐ FIX: Pake Date.now() biar timestamp UTC selalu valid
+  // Sebelumnya parse dari createdAt Lynk yang timezone WIB → Meta dianggap "in the future"
+  const eventTime = Math.floor(Date.now() / 1000);
 
   const payload = {
     data: [{
